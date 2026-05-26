@@ -418,3 +418,161 @@ export const STATIC_INGREDIENTS: StaticIngredient[] = [
 - v1: 50개 고정. 분량 부풀림 차단.
 - 후속 확장은 별도 PR로 LESSONS.md 검토 후 진행.
 - 100개 이상으로 늘어나면 `regulations.ts` 분할 (`regulations/kr.ts`, `eu.ts` 등) 결정.
+
+---
+
+## §8. 에러 / 엣지 케이스 명세
+
+| 케이스 | 분기 시점 | HTTP | 동작 |
+|---|---|---|---|
+| 빈 입력 (텍스트/이미지 모두 없음) | 클라이언트 | - | 분석 버튼 비활성 |
+| 텍스트 5000자 초과 | 클라이언트 | - | 인라인 에러, 버튼 비활성 |
+| 이미지 5MB 초과 | 클라이언트 | - | 인라인 에러, 업로드 거부 |
+| 이미지 MIME 미지원 | 클라이언트 + 서버 | 400 | `bad_request` |
+| 요청 본문 4.5MB 초과 (Vercel) | 서버 | 413 | `payload_too_large` 안내 + "이미지 압축 후 재시도" |
+| 1차 provider 네트워크 실패 | 서버 (fallback) | 200 | 2차 provider로 폴백, 응답에 attempts 포함 |
+| 1차 provider 429 | 서버 (fallback) | 200 | 폴백 |
+| 1차 provider timeout (15s) | 서버 (fallback) | 200 | 폴백 |
+| 1차 provider 응답이 JSON 스키마 미일치 | 서버 (fallback) | 200 | 폴백 (`invalid_output`) |
+| 1차 provider content_filter 거부 | 서버 (fallback) | 200 | 폴백 |
+| 1차 provider 401/403 | 서버 (즉시 throw) | 500 | `auth` — 키 문제, 폴백 무의미 |
+| 모든 provider 실패 | 서버 | 502 | `all_providers_failed` + attempts 본문 |
+| 전체 처리가 Vercel Functions 한도 초과 | 인프라 | 504 | `timeout` 안내 |
+| Rate limit 초과 (일일 10회) | 서버 | 429 | `rate_limit` + resetAt + headers |
+| Vercel KV 일시 장애 (rate limit 저장소) | 서버 (fail-open) | 200 | 카운터 누락 허용 후 정상 처리. LESSONS.md에 한계 기록 |
+
+### 8.1 Fail-open vs Fail-close 결정
+- **Vercel KV 장애 시 fail-open** (요청 통과). 이유: 정상 사용자 차단보다 비용 폭발 위험이 작음 (KV 장애는 드물고, 단시간)
+- 단, 로그에 `kv_failure: true` 명시. 빈도 잦으면 재검토
+
+### 8.2 폴백 다중 호출 시 카운터 정책
+- Rate limit 카운터는 **요청 진입 시 1회만 INCR**
+- `withFallback` 내부의 provider 호출은 카운트 제외
+- 이유: 사용자 입장에선 "분석 1회"이고, provider 실패가 사용자 quota를 소모하면 불공평
+
+---
+
+## §9. Rate Limiting 명세 (별도 강조)
+
+### 9.1 정책
+- IP당 **일일 10회** (KST 자정 리셋)
+- 본인 OpenAI/Claude 키 비용 폭발 방지가 1차 목표
+- 후속 조정 가능 (LESSONS.md 통해)
+
+### 9.2 저장소
+- **Vercel KV** 사용 (Vercel-hosted Redis)
+- 메모리 기반 X — Vercel Functions stateless 환경에서 무력
+- 무료 티어 (일 30K commands) 안에서 충분히 동작
+
+### 9.3 키 구조
+- 형식: `rate:<ip>:<YYYY-MM-DD-KST>`
+- 예: `rate:1.2.3.4:2026-05-26`
+- IP는 `x-forwarded-for` 헤더의 첫 IP 사용 (Vercel이 자동 설정)
+
+### 9.4 원자 연산
+```
+1. key = `rate:${ip}:${todayKST()}`
+2. count = await kv.incr(key)
+3. if count === 1: await kv.expire(key, 86400 + 60)  // 24h + 안전 마진 60s
+4. if count > 10: return { allowed: false, remaining: 0, resetAt: nextMidnightKST }
+5. return { allowed: true, remaining: 10 - count, resetAt: nextMidnightKST }
+```
+
+### 9.5 응답 헤더 (모든 `/api/analyze` 응답)
+- `X-RateLimit-Limit: 10`
+- `X-RateLimit-Remaining: <0~10>`
+- `X-RateLimit-Reset: <epoch sec, 다음 KST 자정>`
+
+### 9.6 UX
+- 헤더에서 잔여 횟수 추출 → Zustand store 업데이트 → 헤더 뱃지 갱신
+- 0/10 일 때:
+  - 분석 버튼 비활성
+  - 메시지: "오늘 분석 횟수를 모두 사용했습니다. 내일 0시(KST)에 리셋됩니다."
+- 8/10 부터 뱃지 색상 노란색 (시각 경고)
+
+### 9.7 개발 우회
+- 환경변수 `SKIP_RATE_LIMIT=1` 설정 시 카운트 무시 + remaining 헤더는 10 유지
+- 프로덕션 빌드에서는 자동으로 비활성 (Vercel `process.env.VERCEL_ENV === 'production'` 검증)
+
+### 9.8 카운트 시점 (재강조)
+- **요청 진입 시점에 1회만 INCR**
+- `withFallback` 내부의 provider 호출 N번은 카운트 0번
+- 사용자 quota 보호 + provider 실패 책임이 사용자로 전이되지 않음
+
+---
+
+## §10. 비기능 요구사항
+
+### 10.1 성능
+- 첫 응답 ≤ 8s (cold start 포함). 8s 초과 시 LESSONS.md 기록 + 모델/Vercel runtime 재검토
+- 클라이언트 번들 ≤ 200KB gzipped
+- LCP ≤ 2.5s (단일 페이지라 어렵지 않음)
+
+### 10.2 접근성
+- WCAG 2.1 AA 준수
+- 키보드 단독 사용 가능 (마우스/터치 의존 X)
+- ARIA 라벨 + 적절한 시멘틱 태그
+- 색상 대비 4.5:1 이상
+
+### 10.3 의료 Disclaimer
+- 결과 화면 하단 항상 표시 (`AnalysisResult.disclaimer` 필드 강제)
+- 텍스트 변경 시 SPEC.md 갱신 필수
+
+### 10.4 보안
+- AI 키 클라이언트 노출 0건 (보안 리뷰 필수)
+- 입력 검증 클라이언트 + 서버 양쪽
+- Prompt injection 휴리스틱 (시드 패턴 차단)
+
+### 10.5 운영성
+- 모든 에러는 Vercel Functions 로그에 분류 코드와 함께 기록
+- API 키 prefix만 마스킹 (`sk-***xxx`)
+- 응답 본문은 200자로 자름
+
+---
+
+## §11. Out of Scope (v1)
+
+명시적으로 **하지 않는 것** — 분량 부풀림 / 스코프 크리프 차단:
+
+- 회원가입 / 로그인 / 세션
+- 분석 결과 영구 저장 / 히스토리
+- 결제 / 유료 플랜
+- 다중 사진 동시 분석
+- 카메라 직접 촬영 (`getUserMedia`) — `<input capture>`로만
+- 다국어 (i18n, 한국어만)
+- 다크 모드
+- IP 화이트리스트 / 베타 코드
+- 성분 검색 / 즐겨찾기
+- AI 응답 스트리밍 (단발성 응답)
+- PWA / 오프라인 지원
+- A/B 테스트 / 분석 트래킹 (GA 등)
+- 100개 이상의 정적 사전 (v1은 50개)
+
+---
+
+## ✅ 사전 논리 점검 체크리스트 (Day 0 완료 전 검증)
+
+| # | 점검 항목 | 결정 | 통과 |
+|---|---|---|---|
+| 1 | `AIProvider` 제네릭이 OpenAI / Claude SDK 시그니처에 매핑 가능 | provider 내부에서 SDK 형식으로 변환 (어댑터 패턴). 인터페이스는 `AnalyzeInput` 단일 형식만 받음 | ✅ |
+| 2 | `AnalyzeInput` 이미지 표현 매핑 | OpenAI는 `data:<mime>;base64,<data>` URL로 조립, Claude는 `{type:'image', source:{type:'base64', media_type, data}}`로 조립 — 둘 다 `base64 + mimeType`에서 변환 가능 | ✅ |
+| 3 | `withFallback`이 zod 검증 실패도 폴백 트리거로 처리 | `options.validate` 콜백 받아 false면 `invalid_output` 에러로 throw → 다음 provider | ✅ |
+| 4 | `auth` / `bad_request`는 즉시 throw | `shouldFallback(errorType)` 함수가 두 케이스만 false 반환 | ✅ |
+| 5 | Vercel Functions 런타임 | **Node 런타임 사용**. Edge는 OpenAI/Anthropic SDK 일부 미지원 + Buffer/stream 호환성 이슈 | ✅ |
+| 6 | 첫 응답 8s 안에 가능 | cold start ~1.5s + AI 호출 5~7s. timeoutMs 15s로 여유. 8s 초과 시 LESSONS 기록 | ✅ |
+| 7 | INCI 표기 매칭 정확도 | 시스템 프롬프트에서 INCI 강제 + `normalizeIngredientName`으로 사전 매칭 시 정규화 통과 | ✅ |
+| 8 | 모바일 프레임 420px 가독성 | 카드 내부 정보 한 줄 안 넘치게: 성분명/뱃지/효능을 압축 표현, 한글명은 줄바꿈 허용 | ✅ |
+| 9 | `schemaVersion` 일관성 | `schema.ts`에 `z.literal('1')`, 모든 API 응답에 포함, v2는 `discriminatedUnion`로 전환 | ✅ |
+| 10 | Rate limit이 stateless에서 정확히 동작 | Vercel KV INCR + EXPIRE 원자 연산. 키 `rate:<ip>:<YYYY-MM-DD-KST>` | ✅ |
+| 11 | 정상 사용자 1명 차단되지 않는 균형 | 일일 10회. 데모/디버깅 시 `SKIP_RATE_LIMIT=1` 우회 | ✅ |
+| 12 | Rate limit 카운터가 폴백으로 부풀지 않음 | 요청 진입 시 1회만 INCR. `withFallback` 내부 호출은 카운트 제외 | ✅ |
+| 13 | Vercel KV 장애 시 동작 | **Fail-open** (요청 통과). 로그에 `kv_failure: true` | ✅ |
+| 14 | 의료 disclaimer 누락 방지 | `AnalysisResult.disclaimer` 강제 필드 + 결과 화면 하단 항상 표시 | ✅ |
+| 15 | 정적 사전 매칭이 AI 응답을 덮어쓰지만 출처 표시 | `source: 'static' | 'ai'` 뱃지로 사용자에게 투명하게 표시 | ✅ |
+
+**모든 항목 ✅ — Day 1 시작 가능.**
+
+---
+
+## 변경 이력
+- 2026-05-26 v1.0: 초안 작성 + 사전 점검 통과
