@@ -23,7 +23,11 @@ export const RegulationSchema = z.object({
 
 export const IngredientSourceSchema = z.enum(['static', 'ai']);
 
-export const IngredientSchema = z.object({
+/**
+ * AI에게 직접 받는 ingredient. source 필드는 후처리에서 채우므로 제외.
+ * AI가 source 같은 메타필드를 모르고 응답하더라도 검증을 통과시킨다.
+ */
+export const IngredientFromAISchema = z.object({
   name: z.string().min(1),
   koreanName: z.string().optional(),
   purpose: z.string().min(1),
@@ -31,9 +35,28 @@ export const IngredientSchema = z.object({
   allergens: z.array(z.string()),
   regulations: z.array(RegulationSchema),
   confidence: z.number().min(0).max(1),
+});
+
+/**
+ * 후처리 후 클라이언트에 노출하는 ingredient. source가 강제됨.
+ */
+export const IngredientSchema = IngredientFromAISchema.extend({
   source: IngredientSourceSchema,
 });
 
+/**
+ * AI 응답 단계 — fallback의 validate 콜백에서 사용.
+ */
+export const AnalysisResultFromAISchema = z.object({
+  schemaVersion: z.literal('1'),
+  ingredients: z.array(IngredientFromAISchema),
+  warnings: z.array(z.string()).optional(),
+  disclaimer: z.string().min(1),
+});
+
+/**
+ * 후처리 후 최종 응답 — analyze.ts에서 클라이언트 응답 직전 검증.
+ */
 export const AnalysisResultSchema = z.object({
   schemaVersion: z.literal('1'),
   ingredients: z.array(IngredientSchema),
@@ -45,7 +68,9 @@ export type Region = z.infer<typeof RegionSchema>;
 export type RegulationStatus = z.infer<typeof RegulationStatusSchema>;
 export type Regulation = z.infer<typeof RegulationSchema>;
 export type IngredientSource = z.infer<typeof IngredientSourceSchema>;
+export type IngredientFromAI = z.infer<typeof IngredientFromAISchema>;
 export type Ingredient = z.infer<typeof IngredientSchema>;
+export type AnalysisResultFromAI = z.infer<typeof AnalysisResultFromAISchema>;
 export type AnalysisResult = z.infer<typeof AnalysisResultSchema>;
 
 /**
@@ -56,11 +81,25 @@ export type AnalysisResult = z.infer<typeof AnalysisResultSchema>;
  */
 type ZodIssue = z.ZodError['issues'][number];
 
-export type ValidationResult =
-  | { ok: true; data: AnalysisResult }
+export type ValidationResult<T> =
+  | { ok: true; data: T }
   | { ok: false; issues: ZodIssue[] };
 
-export const validateAnalysisResult = (raw: unknown): ValidationResult => {
+/**
+ * AI 응답 검증 (fallback의 validate 콜백용). source 필드 없이도 통과.
+ */
+export const validateAnalysisResultFromAI = (raw: unknown): ValidationResult<AnalysisResultFromAI> => {
+  const parsed = AnalysisResultFromAISchema.safeParse(raw);
+  if (parsed.success) {
+    return { ok: true, data: parsed.data };
+  }
+  return { ok: false, issues: parsed.error.issues };
+};
+
+/**
+ * 후처리 후 최종 응답 검증 (analyze.ts에서 클라이언트 응답 직전).
+ */
+export const validateAnalysisResult = (raw: unknown): ValidationResult<AnalysisResult> => {
   const parsed = AnalysisResultSchema.safeParse(raw);
   if (parsed.success) {
     return { ok: true, data: parsed.data };

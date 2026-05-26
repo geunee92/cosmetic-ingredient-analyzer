@@ -21,7 +21,8 @@ import {
   AllProvidersFailedError,
   NonFallbackableError,
 } from './_lib/fallback';
-import { validateAnalysisResult } from './_lib/schema';
+import { validateAnalysisResult, validateAnalysisResultFromAI } from './_lib/schema';
+import { postProcessAnalysisResult } from './_lib/postProcess';
 import { hasPromptInjection } from './_lib/prompt';
 import { consumeQuota, buildRateLimitHeaders } from './_lib/rateLimit';
 
@@ -115,23 +116,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     });
   }
 
-  // 4. 멀티 폴백 실행 + zod 검증
+  // 4. 멀티 폴백 실행 + AI 응답 검증 (source 없는 FromAI 스키마)
   try {
     const fallbackResult = await withFallback(providers, input, {
-      validate: (raw) => validateAnalysisResult(raw).ok,
+      validate: (raw) => validateAnalysisResultFromAI(raw).ok,
       timeoutMs: 15_000,
     });
 
     // validate를 통과했으므로 안전하게 재검증해 정형화
-    const validated = validateAnalysisResult(fallbackResult.result);
+    const validated = validateAnalysisResultFromAI(fallbackResult.result);
     if (!validated.ok) {
       // 이론적으로 발생 안 함 (이미 validate 통과). 방어용
-      return sendError(res, 502, 'invalid_output', '응답 검증 실패');
+      return sendError(res, 502, 'invalid_output', 'AI 응답 검증 실패');
+    }
+
+    // 5. 사전 기반 후처리 (source 채움 + 규제 정합)
+    const processed = postProcessAnalysisResult(validated.data);
+
+    // 6. 후처리 후 최종 검증 (source 포함)
+    const finalValidated = validateAnalysisResult(processed);
+    if (!finalValidated.ok) {
+      return sendError(res, 502, 'invalid_output', '후처리 응답 검증 실패');
     }
 
     res.status(200).json({
       schemaVersion: '1' as const,
-      result: validated.data,
+      result: finalValidated.data,
       usedProvider: fallbackResult.usedProvider,
       attempts: fallbackResult.attempts.map((a) => ({
         provider: a.provider,
