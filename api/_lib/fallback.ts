@@ -89,7 +89,7 @@ const withTimeout = <T>(promise: Promise<T>, ms: number, providerName: string): 
 };
 
 export const withFallback = async <TInput, TOutput>(
-  providers: AIProvider<TInput, TOutput>[],
+  providers: readonly AIProvider<TInput, TOutput>[],
   input: TInput,
   options: FallbackOptions<TOutput> = {},
 ): Promise<FallbackResult<TOutput>> => {

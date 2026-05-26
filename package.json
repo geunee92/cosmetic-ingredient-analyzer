@@ -27,6 +27,7 @@
     "@types/node": "^22.10.5",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@vercel/node": "^5.8.4",
     "@vitejs/plugin-react": "^4.3.4",
     "@vitest/ui": "^2.1.8",
     "typescript": "^5.7.2",
