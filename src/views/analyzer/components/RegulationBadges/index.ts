@@ -1,0 +1,1 @@
+export { RegulationBadges } from './RegulationBadges';
