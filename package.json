@@ -13,6 +13,7 @@
     "api:dev": "vercel dev"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.98.0",
     "@emotion/react": "^11.13.3",
     "@emotion/styled": "^11.13.0",
     "openai": "^6.39.0",
