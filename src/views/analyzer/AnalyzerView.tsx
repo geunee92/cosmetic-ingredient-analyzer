@@ -18,13 +18,44 @@ import { Spinner } from '@/components/base/Spinner';
 import { Button } from '@/components/base/Button';
 import { LoadingBlock, ErrorBlock, ErrorTitle, ErrorMessage, Helper, ContentWrap } from './style';
 
-const errorTitle: Record<string, string> = {
-  bad_request: '입력을 다시 확인해주세요',
-  rate_limit: '오늘 분석 횟수를 모두 사용했어요',
-  all_providers_failed: '분석에 실패했어요',
-  auth: '일시적인 서버 문제예요',
-  internal_error: '잠시 후 다시 시도해주세요',
-  network: '네트워크 연결을 확인해주세요',
+type ErrorPresentation = {
+  title: string;
+  hint?: string;
+};
+
+const presentError = (code: string): ErrorPresentation => {
+  switch (code) {
+    case 'bad_request':
+      return {
+        title: '입력을 다시 확인해주세요',
+        hint: '성분표 텍스트가 비어 있거나 이미지가 너무 클 수 있어요.',
+      };
+    case 'rate_limit':
+      return {
+        title: '오늘 분석 횟수를 모두 사용했어요',
+        hint: '한국 시간 자정에 리셋됩니다.',
+      };
+    case 'all_providers_failed':
+      return {
+        title: '분석에 실패했어요',
+        hint: 'AI 서비스 일시 장애일 수 있어요. 잠시 후 다시 시도해주세요.',
+      };
+    case 'auth':
+      return {
+        title: '일시적인 서버 문제예요',
+        hint: '관리자에게 문의하거나 잠시 후 다시 시도해주세요.',
+      };
+    case 'network':
+      return {
+        title: '네트워크 연결을 확인해주세요',
+        hint: '오프라인이거나 응답이 너무 느린 상태예요.',
+      };
+    case 'internal_error':
+    default:
+      return {
+        title: '잠시 후 다시 시도해주세요',
+      };
+  }
 };
 
 const formatResetTime = (epochSec: number): string => {
@@ -53,20 +84,22 @@ export const AnalyzerView = () => {
 
         {status === 'done' && <ResultSection />}
 
-        {status === 'error' && error && (
-          <ErrorBlock role="alert">
-            <ErrorTitle>{errorTitle[error.code] ?? '오류가 발생했습니다'}</ErrorTitle>
-            <ErrorMessage>{error.message}</ErrorMessage>
-            {error.code === 'rate_limit' && error.resetAt && (
-              <Helper>리셋: {formatResetTime(error.resetAt)}</Helper>
-            )}
-            {error.code !== 'rate_limit' && (
-              <Button variant="secondary" size="md" onClick={clearError}>
-                다시 시도
-              </Button>
-            )}
-          </ErrorBlock>
-        )}
+        {status === 'error' && error && (() => {
+          const view = presentError(error.code);
+          return (
+            <ErrorBlock role="alert">
+              <ErrorTitle>{view.title}</ErrorTitle>
+              {view.hint && <ErrorMessage>{view.hint}</ErrorMessage>}
+              {error.code === 'rate_limit' && error.resetAt ? (
+                <Helper>리셋 시각: {formatResetTime(error.resetAt)}</Helper>
+              ) : (
+                <Button variant="secondary" size="md" onClick={clearError}>
+                  다시 시도
+                </Button>
+              )}
+            </ErrorBlock>
+          );
+        })()}
       </ContentWrap>
     </>
   );
