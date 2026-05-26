@@ -65,6 +65,7 @@ type Actions = {
     attempts: AttemptInfo[];
   }) => void;
   setError: (err: AnalyzerError) => void;
+  clearError: () => void;
   setRateLimit: (rl: RateLimitState) => void;
   reset: () => void;
 };
@@ -101,6 +102,9 @@ export const useAnalyzerStore = create<State & Actions>((set) => ({
     set({ status: 'done', result, usedProvider, attempts, error: null }),
 
   setError: (err) => set({ status: 'error', error: err, result: null }),
+
+  // 입력 보존하고 에러만 지움 (재시도 UX)
+  clearError: () => set({ status: 'idle', error: null }),
 
   setRateLimit: (rl) => set({ rateLimit: rl }),
 
