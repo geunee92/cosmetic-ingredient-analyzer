@@ -362,12 +362,13 @@ Water, Glycerin, Niacinamide, ...
 - few-shot 예시는 system 메시지에 포함
 
 ### 6.6 모델 / 파라미터
-| Provider | Model | Temperature | Max Tokens |
-|---|---|---|---|
-| OpenAI | `gpt-4o-mini` | 0.2 | 4000 |
-| Claude | `claude-3-5-haiku-latest` 또는 `claude-3-5-sonnet-latest` | 0.2 | 4000 |
+| 단계 | Provider | Model | Temperature | Max Tokens |
+|---|---|---|---|---|
+| 2차 상세 | OpenAI | `gpt-4o` | 0.2 | 8000 |
+| 2차 상세 | Claude | `claude-3-5-haiku-20241022` | 0.2 | 8000 |
+| 1차 스크리닝 | OpenAI/Claude | 동일 모델, vision | 0.2 | 8000 (출력 가벼움) |
 
-비용 우선이라 mini/haiku 클래스. 품질 부족 발견 시 LESSONS.md에 기록 후 상향.
+v1은 mini/haiku 비용 우선이었으나, 50성분 풀 분석이 mini에서 60s+ → `gpt-4o`로 상향(§12 참조). Claude는 `-latest` 별칭이 404나 날짜 고정 ID 사용. 1차 스크리닝은 같은 모델로 가벼운 출력만 받아 빠름.
 
 ---
 
@@ -386,7 +387,7 @@ Water, Glycerin, Niacinamide, ...
 - **EU**: Regulation (EC) No 1223/2009 — Annex II (금지), III (제한), CosIng DB
 - **알러젠**: SCCS Opinion on Fragrance Allergens (EU)
 
-### 7.3 데이터 형식 (`src/data/regulations.ts`)
+### 7.3 데이터 형식 (`api/_lib/regulations.ts`)
 ```typescript
 type StaticIngredient = {
   inci: string;                     // 영문 INCI 정식 표기
@@ -550,6 +551,52 @@ export const STATIC_INGREDIENTS: StaticIngredient[] = [
 
 ---
 
+## §12. 성분 분석 파이프라인 V2 — tier 선별 단일 호출
+
+### 12.1 동기
+v1은 전성분을 단일 AI 호출로 분석하되 **모든 성분을 풀 출력**(INCI·한글명·효능·주의·알러젠·규제3지역)했다. 실제 화장품 라벨(~50성분)은 출력 토큰이 성분 수에 비례해 폭증 → gpt-4o로도 60~70s, Vercel `maxDuration: 60s` 초과로 502. **모든 성분을 풀 분석할 필요가 없다**(정제수·글리세린·추출물 등은 가볍게)는 통찰에서 출발.
+
+### 12.2 핵심: 출력량을 줄인다 (호출을 나누지 않는다)
+문제는 호출 횟수가 아니라 **출력량**이다. 따라서 호출은 **단일 1회** 그대로 두되, AI가 성분을 두 등급(tier)으로 나눠 **안전 성분은 간단히, 주의 성분만 상세히** 출력하게 한다. 출력이 절반 이하로 줄어 단일 호출로도 빠르다(실측: 50성분 텍스트 22s, 이미지 39s — 모두 60s 내).
+
+> 설계 히스토리: 초안은 "1차 스크리닝 → 2차 선별 상세"의 2단계 체인이었으나, 단일 호출 + tier 선별만으로 목표 성능이 나와 **과설계로 판단해 단일 호출로 단순화**. (LESSONS 기록)
+
+### 12.3 데이터 흐름
+```
+입력: 텍스트 전성분 OR 이미지(vision)
+  → [AI 1회] 각 성분을 tier로 분류해 가변 출력
+       · tier='safe'    → name/koreanName/purpose/tier 만 (간단)
+       · tier='notable' → 위 + cautions/allergens/regulations/confidence (상세)
+  → [후처리 안전망] 정적 사전 매칭 시 규제 덮어쓰기 + tier='notable' 강제 승격
+  → 응답 (notable=상세 카드 / safe=간단 표시)
+```
+파싱·청크·스크리닝 단계 없음. v1의 `withFallback` 단일 경로를 그대로 사용.
+
+### 12.4 tier 분류 (프롬프트, §6 SYSTEM_PROMPT)
+- **safe**: 규제·주의·알러젠 전혀 없는 명백한 안전 성분(물, 글리세린, 단순 보습/점증/유화제, 규제 무관 식물 추출물). → name/koreanName/purpose/tier만 출력.
+- **notable**: 규제·주의·알러젠·농도제한·자외선차단·방부·산(AHA/BHA)·활성성분·착색제 가능성이 조금이라도 있으면. → 풀 상세.
+- **애매하면 notable**(규제 앱이라 false negative 회피).
+- 모든 성분을 입력 순서대로, 빠짐없이 반환.
+
+### 12.5 정적 사전 안전망 (후처리, `postProcessAnalysisResult`)
+- AI 응답 각 성분의 영문 `name`으로 `findStaticIngredient` 매칭 → 매칭(위험성분)이면 regulations/cautions/allergens를 사전 데이터로 덮어쓰고 `source='static'` + **`tier='notable'` 강제 승격**(AI가 safe로 놓쳐도 보강).
+- **best-effort**: 사전 50개에 있는 위험성분만 잡는다. 사전에 없거나 AI 영문 표기가 사전 `normalized`와 다르면(Aqua/Water, CI번호) 누락 가능 → **완벽한 규제 보장 아님**. `disclaimer`로 한계 고지(기존 유지).
+
+### 12.6 타입 / UI
+- `Ingredient`·`IngredientFromAI`에 `tier: 'safe'|'notable'` 추가. **safe는 cautions/allergens/regulations/confidence optional**(간단 출력이라 없을 수 있음).
+- UI: notable=상세 카드(규제·주의·알러젠), safe=이름+한줄 효능 간단 표시. **전성분 표시**(투명성). 카드가 `tier`로 조건부 렌더.
+
+### 12.7 이미지
+- 별도 경로 없음. 이미지도 동일 단일 호출(vision)이 OCR+추출+tier 분류를 한 번에 수행. 텍스트와 완전히 동일한 프롬프트·후처리.
+
+### 12.8 비용 / Rate Limit / 성능
+- 단일 호출 유지 → v1 대비 호출 수 동일, 출력만 감소(비용↓·속도↑). **spend cap으로 상한 관리**(공개 전 필수).
+- Rate limit·`consumeQuota` 불변(진입 시 1회 INCR).
+- 모델 `gpt-4o`(2차/단일 동일), max_tokens 8000, `withFallback` timeoutMs 45s, `maxDuration` 60s.
+- **알려진 한계**: 거의 모든 성분이 notable인 극단 케이스(색조 등 규제 성분 다수)는 출력이 커져 느려질 수 있음 → 그때 청크 분할을 추가 도입(현재는 YAGNI).
+
+---
+
 ## ✅ 사전 논리 점검 체크리스트 (Day 0 완료 전 검증)
 
 | # | 점검 항목 | 결정 | 통과 |
@@ -576,3 +623,4 @@ export const STATIC_INGREDIENTS: StaticIngredient[] = [
 
 ## 변경 이력
 - 2026-05-26 v1.0: 초안 작성 + 사전 점검 통과
+- 2026-06-11 v2.0: §12 추가 — tier 선별 단일 호출(safe=간단 / notable=상세) + 정적 사전 안전망. 출력량을 줄여 50성분 타임아웃(60s) 해소(실측 텍스트 22s·이미지 39s). 모델 gpt-4o, max_tokens 8000, maxDuration 60s. (초안의 2단계 체인은 과설계로 판단해 단일 호출로 단순화.)
