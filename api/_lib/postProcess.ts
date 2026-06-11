@@ -12,7 +12,7 @@
  */
 
 import type { AnalysisResultFromAI, AnalysisResult, Ingredient } from './schema';
-import { findStaticIngredient } from '../../src/data/regulations';
+import { findStaticIngredient } from './regulations';
 
 export const postProcessAnalysisResult = (raw: AnalysisResultFromAI): AnalysisResult => {
   const ingredients: Ingredient[] = raw.ingredients.map((ai) => {

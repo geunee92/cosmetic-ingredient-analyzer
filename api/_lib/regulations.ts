@@ -16,7 +16,7 @@
  * Refs: SPEC.md §7 정적 규제 사전
  */
 
-import type { Regulation } from '../../api/_lib/schema';
+import type { Regulation } from './schema';
 
 export type StaticIngredient = {
   inci: string;
