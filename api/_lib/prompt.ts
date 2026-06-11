@@ -9,6 +9,7 @@
  * Refs: SPEC.md §6 AI 프롬프트 명세, SECURITY.md §3 Prompt Injection
  */
 
+// notable 예시 (알러젠) — 풀 상세
 const FEW_SHOT_FRAGRANCE = `
 입력: Fragrance
 
@@ -17,6 +18,7 @@ const FEW_SHOT_FRAGRANCE = `
   "name": "Fragrance",
   "koreanName": "향료",
   "purpose": "제품에 향을 부여",
+  "tier": "notable",
   "cautions": ["알레르기 유발 가능", "민감 피부 주의"],
   "allergens": ["Limonene", "Linalool"],
   "regulations": [
@@ -28,6 +30,7 @@ const FEW_SHOT_FRAGRANCE = `
 }
 `.trim();
 
+// safe 예시 (기본 보습제) — 간단 형식 (상세 필드 생략)
 const FEW_SHOT_GLYCERIN = `
 입력: Glycerin
 
@@ -36,17 +39,11 @@ const FEW_SHOT_GLYCERIN = `
   "name": "Glycerin",
   "koreanName": "글리세린",
   "purpose": "보습. 각질층의 수분 유지",
-  "cautions": [],
-  "allergens": [],
-  "regulations": [
-    {"region":"KR","status":"allowed"},
-    {"region":"US_MoCRA","status":"allowed"},
-    {"region":"EU_CPNP","status":"allowed"}
-  ],
-  "confidence": 0.98
+  "tier": "safe"
 }
 `.trim();
 
+// notable 예시 (농도 제한) — 풀 상세
 const FEW_SHOT_SALICYLIC = `
 입력: Salicylic Acid
 
@@ -55,6 +52,7 @@ const FEW_SHOT_SALICYLIC = `
   "name": "Salicylic Acid",
   "koreanName": "살리실산",
   "purpose": "각질 제거. BHA 계열 화학적 박리제",
+  "tier": "notable",
   "cautions": ["광민감", "임산부 사용 시 의사 상담"],
   "allergens": [],
   "regulations": [
@@ -70,15 +68,23 @@ export const SYSTEM_PROMPT = `
 당신은 화장품 성분 분석 전문가입니다.
 사용자가 입력한 성분표를 분석해 지정된 JSON 스키마를 따르는 응답을 반환합니다.
 
+★ 가장 중요 — 성분을 두 등급(tier)으로 나눠 출력량을 조절하세요:
+- tier="safe": 규제·주의·알러젠이 전혀 없는 명백한 안전 성분(물, 글리세린, 단순 보습/점증/유화제, 규제 무관 식물 추출물 등).
+  → name / koreanName / purpose / tier 만 출력. cautions·allergens·regulations·confidence는 생략(출력 경량화).
+- tier="notable": 규제·주의·알러젠·농도제한·자외선차단·방부·산(AHA/BHA)·활성성분(레티놀 등)·착색제 가능성이 조금이라도 있는 성분.
+  → 위 4개 필드 + cautions·allergens·regulations·confidence 까지 풀 상세 출력.
+- 애매하면 notable로(규제 누락을 피하기 위해 보수적으로 판단).
+
 규칙:
 1. 응답은 반드시 지정된 JSON 스키마를 따르세요. 다른 텍스트 일절 금지.
-2. 성분명은 INCI(International Nomenclature of Cosmetic Ingredients) 정식 표기를 사용하세요.
+2. 성분명은 INCI(International Nomenclature of Cosmetic Ingredients) 정식 영문 표기를 사용하세요.
 3. 한글명이 있는 경우 식약처 고시 표기를 우선합니다.
-4. regulations에는 한국(KR), 미국 MoCRA(US_MoCRA), EU CPNP(EU_CPNP) 세 지역 모두 포함하세요. 정보가 부족하면 status를 "unknown"으로 두세요.
+4. (notable만) regulations에는 한국(KR), 미국 MoCRA(US_MoCRA), EU CPNP(EU_CPNP) 세 지역 모두 포함. 정보 부족 시 status="unknown".
 5. cautions와 allergens는 짧은 키워드로 (1~3개). 긴 설명 금지.
 6. 의학적 진단/처방 표현 금지. 일반 정보만 제공.
-7. confidence는 본인의 답변 신뢰도(0~1). 잘 모르는 성분은 0.5 이하로 낮춰주세요.
+7. (notable만) confidence는 답변 신뢰도(0~1). 잘 모르는 성분은 0.5 이하.
 8. 이미지가 주어진 경우 OCR로 성분표를 먼저 추출한 뒤 분석하세요.
+9. 모든 성분을 입력 순서대로, 하나도 빠뜨리지 말고 반환하세요.
 
 전체 응답 형식:
 {
@@ -88,13 +94,17 @@ export const SYSTEM_PROMPT = `
   "disclaimer": "본 분석은 일반 정보 제공용이며 의료 조언이 아닙니다."
 }
 
-각 성분 객체 형식:
+성분 객체 — safe 형식(간단):
+{ "name": "영문 INCI", "koreanName": "한글명", "purpose": "효능 한줄", "tier": "safe" }
+
+성분 객체 — notable 형식(상세):
 {
   "name": "영문 INCI",
-  "koreanName": "한글명 (있으면)",
+  "koreanName": "한글명",
   "purpose": "효능 1~2줄",
-  "cautions": ["키워드 1", "키워드 2"],
-  "allergens": ["알러젠 1"],
+  "tier": "notable",
+  "cautions": ["키워드"],
+  "allergens": ["알러젠"],
   "regulations": [<region 3개>],
   "confidence": 0.0~1.0
 }

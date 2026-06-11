@@ -24,24 +24,47 @@ export const RegulationSchema = z.object({
 export const IngredientSourceSchema = z.enum(['static', 'ai']);
 
 /**
- * AI에게 직접 받는 ingredient. source 필드는 후처리에서 채우므로 제외.
- * AI가 source 같은 메타필드를 모르고 응답하더라도 검증을 통과시킨다.
+ * 성분 중요도 (§12).
+ * - safe: AI가 규제·주의 무관으로 판단 → 간단 출력(상세 필드 생략)
+ * - notable: 규제·주의·알러젠 가능성 → 풀 상세 출력
+ */
+export const IngredientTierSchema = z.enum(['safe', 'notable']);
+
+/**
+ * AI에게 직접 받는 ingredient (§12). source는 후처리에서 채우므로 제외.
+ *
+ * 단일 호출에서 AI가 성분별로 tier를 판단해 가변 출력한다:
+ *  - tier='safe'  → name/koreanName/purpose/tier 만 (상세 필드 생략 → 출력 경량화)
+ *  - tier='notable' → cautions/allergens/regulations/confidence까지 풀 상세
+ * 따라서 상세 필드는 optional. notable인데 누락되면 후처리에서 기본값 보정.
  */
 export const IngredientFromAISchema = z.object({
   name: z.string().min(1),
   koreanName: z.string().optional(),
   purpose: z.string().min(1),
-  cautions: z.array(z.string()),
-  allergens: z.array(z.string()),
-  regulations: z.array(RegulationSchema),
-  confidence: z.number().min(0).max(1),
+  tier: IngredientTierSchema,
+  cautions: z.array(z.string()).optional(),
+  allergens: z.array(z.string()).optional(),
+  regulations: z.array(RegulationSchema).optional(),
+  confidence: z.number().min(0).max(1).optional(),
 });
 
 /**
  * 후처리 후 클라이언트에 노출하는 ingredient. source가 강제됨.
+ *
+ * tier='safe'(2차 미경유)는 regulations/cautions/allergens가 비어있을 수 있어
+ * 해당 필드를 optional로 완화한다. notable은 2차 풀 분석이라 항상 채워진다.
  */
-export const IngredientSchema = IngredientFromAISchema.extend({
+export const IngredientSchema = z.object({
+  name: z.string().min(1),
+  koreanName: z.string().optional(),
+  purpose: z.string().min(1),
+  cautions: z.array(z.string()).optional(),
+  allergens: z.array(z.string()).optional(),
+  regulations: z.array(RegulationSchema).optional(),
+  confidence: z.number().min(0).max(1).optional(),
   source: IngredientSourceSchema,
+  tier: IngredientTierSchema,
 });
 
 /**
@@ -68,6 +91,7 @@ export type Region = z.infer<typeof RegionSchema>;
 export type RegulationStatus = z.infer<typeof RegulationStatusSchema>;
 export type Regulation = z.infer<typeof RegulationSchema>;
 export type IngredientSource = z.infer<typeof IngredientSourceSchema>;
+export type IngredientTier = z.infer<typeof IngredientTierSchema>;
 export type IngredientFromAI = z.infer<typeof IngredientFromAISchema>;
 export type Ingredient = z.infer<typeof IngredientSchema>;
 export type AnalysisResultFromAI = z.infer<typeof AnalysisResultFromAISchema>;
