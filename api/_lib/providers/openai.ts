@@ -17,7 +17,7 @@ import { type AIProvider, type AnalyzeInput } from './types';
 import { ProviderError, normalizeError } from '../errors';
 import { SYSTEM_PROMPT, buildTextUserMessage, buildImageUserMessage } from '../prompt';
 
-const MODEL = 'gpt-4o-mini';
+const MODEL = 'gpt-4o';
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -50,7 +50,7 @@ export const openaiProvider: AIProvider<AnalyzeInput, unknown> = {
       const completion = await client.chat.completions.create({
         model: MODEL,
         temperature: 0.2,
-        max_tokens: 4000,
+        max_tokens: 8000,
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },

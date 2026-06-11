@@ -16,7 +16,7 @@ import { type AIProvider, type AnalyzeInput } from './types';
 import { ProviderError, normalizeError } from '../errors';
 import { SYSTEM_PROMPT, buildTextUserMessage, buildImageUserMessage } from '../prompt';
 
-const MODEL = 'claude-3-5-haiku-latest';
+const MODEL = 'claude-3-5-haiku-20241022';
 const TOOL_NAME = 'analyze_ingredients';
 
 const client = new Anthropic({
@@ -102,7 +102,7 @@ export const claudeProvider: AIProvider<AnalyzeInput, unknown> = {
     try {
       const response = await client.messages.create({
         model: MODEL,
-        max_tokens: 4000,
+        max_tokens: 8000,
         temperature: 0.2,
         system: SYSTEM_PROMPT,
         tools: [

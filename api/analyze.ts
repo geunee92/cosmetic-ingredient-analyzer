@@ -120,7 +120,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   try {
     const fallbackResult = await withFallback(providers, input, {
       validate: (raw) => validateAnalysisResultFromAI(raw).ok,
-      timeoutMs: 15_000,
+      timeoutMs: 45_000,
     });
 
     // validate를 통과했으므로 안전하게 재검증해 정형화

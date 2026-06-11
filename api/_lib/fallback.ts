@@ -97,7 +97,7 @@ export const withFallback = async <TInput, TOutput>(
     throw new Error('withFallback: providers must not be empty');
   }
 
-  const timeoutMs = options.timeoutMs ?? 15_000;
+  const timeoutMs = options.timeoutMs ?? 25_000;
   const attempts: AttemptLog[] = [];
 
   for (const provider of providers) {
