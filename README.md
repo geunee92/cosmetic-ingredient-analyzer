@@ -4,9 +4,13 @@
 
 ## 데모
 
-> (배포 후 GIF 추가 예정)
+🔗 **라이브**: https://cosmetic-ingredient-analyzer.vercel.app
 
-배포 URL: (Vercel 배포 후 추가)
+성분표를 붙여넣거나 라벨 사진을 올리면, AI가 각 성분을 **safe / notable** 두 등급으로 나눠 분석합니다. 규제·주의가 없는 기본 성분은 간단히, 규제·알러젠 가능성이 있는 성분만 국가별 규제·주의사항까지 상세히 보여줍니다.
+
+<p align="center">
+  <img src="docs/demo-result.png" width="320" alt="화장품 성분 분석 결과 화면 — safe 성분은 간단, notable 성분은 규제/주의 상세">
+</p>
 
 ## 지원 규제 지역
 
@@ -26,22 +30,27 @@
 
 → 구현: [`api/_lib/fallback.ts`](./api/_lib/fallback.ts), [`api/_lib/errors.ts`](./api/_lib/errors.ts)
 
-### 3. 하이브리드 도메인 데이터
-LLM은 자연어 설명에 강하지만 국가별 규제 정보는 환각 위험이 큽니다. 고위험·국가별 차이 큰 성분 **50개**는 정적 사전으로 큐레이션해 AI 응답을 덮어쓰고, 카드에 출처(`정적 사전` / `AI 분석`)를 명시해 사용자에게 투명하게 노출합니다.
+### 3. 대량 성분 분석 성능 — tier 선별 단일 호출
+실제 화장품 라벨(~50성분)을 모두 풀 분석(성분당 효능·주의·알러젠·규제3지역)하면 출력 토큰이 성분 수에 비례해 폭증, gpt-4o로도 60~70s가 걸려 Vercel `maxDuration: 60s`를 초과했습니다. **호출을 나누는 대신 출력을 줄이는** 방향으로, AI가 각 성분을 `safe`/`notable`로 분류해 안전 성분은 간단히·주의 성분만 상세히 출력하게 했습니다. 출력이 절반↓로 줄어 **50성분 텍스트 22s / 이미지 39s**로 단축(단일 호출 유지).
 
-→ 구현: [`src/data/regulations.ts`](./src/data/regulations.ts), [`api/_lib/postProcess.ts`](./api/_lib/postProcess.ts)
+→ 구현: [`api/_lib/prompt.ts`](./api/_lib/prompt.ts), [`SPEC.md §12`](./SPEC.md)
 
-### 4. 백엔드 부재 + API 키 보호
+### 4. 하이브리드 도메인 데이터 (안전망)
+LLM은 자연어 설명에 강하지만 국가별 규제 정보는 환각 위험이 큽니다. 고위험·국가별 차이 큰 성분 **50개**는 정적 사전으로 큐레이션해 AI 응답을 덮어쓰고(`source: 'static'`), AI가 안전으로 잘못 분류해도 사전에 있으면 `notable`로 강제 승격합니다. 카드에 출처(`정적 사전` / `AI 분석` / `기본 안전`)를 명시해 투명하게 노출합니다.
+
+→ 구현: [`api/_lib/regulations.ts`](./api/_lib/regulations.ts), [`api/_lib/postProcess.ts`](./api/_lib/postProcess.ts)
+
+### 5. 백엔드 부재 + API 키 보호
 프론트에서 OpenAI/Claude API를 직접 호출하면 키가 클라이언트 번들에 노출됩니다. Vercel Functions를 프록시 계층으로 두어 키를 서버 환경변수로만 접근합니다.
 
 → 구현: [`api/analyze.ts`](./api/analyze.ts), [`SECURITY.md`](./SECURITY.md)
 
-### 5. AI 비용 보호 (IP당 일일 10회)
-본인 OpenAI/Claude 키 비용 폭발 방지를 위해 Vercel KV 기반 rate limit을 적용합니다. 메모리 기반은 stateless 환경에서 무력하므로 외부 저장소 필수. 폴백으로 provider가 여러 번 호출돼도 사용자 quota는 1회만 소모됩니다.
+### 6. AI 비용 보호 (IP당 일일 5회)
+본인 OpenAI/Claude 키 비용 폭발 방지를 위해 Vercel KV(Upstash Redis) 기반 rate limit을 적용합니다. 메모리 기반은 stateless 환경에서 무력하므로 외부 저장소 필수. 키에 KST 날짜를 박아(`rate:<ip>:<YYYY-MM-DD>`) 자정마다 자동 리셋되고, TTL로 옛 키는 자동 정리됩니다. 폴백으로 provider가 여러 번 호출돼도 사용자 quota는 1회만 소모됩니다.
 
 → 구현: [`api/_lib/rateLimit.ts`](./api/_lib/rateLimit.ts)
 
-### 6. AI 협업 하네스
+### 7. AI 협업 하네스
 AI 도구가 매번 코드베이스를 처음부터 탐색하지 않도록 진입점 ↔ 명세 ↔ 규칙 ↔ 학습 기록을 별도 문서군으로 정리했습니다.
 
 | 문서 | 용도 |
@@ -59,8 +68,8 @@ AI 도구가 매번 코드베이스를 처음부터 탐색하지 않도록 진�
 
 **프론트엔드**: React 19 / TypeScript / Vite / emotion / Zustand
 **서버리스**: Vercel Functions (Node runtime)
-**AI**: OpenAI (`gpt-4o-mini`) · Anthropic Claude (`claude-3-5-haiku-latest`)
-**저장소**: Vercel KV (Redis)
+**AI**: OpenAI (`gpt-4o`, Vision) · Anthropic Claude (`claude-3-5-haiku`) 폴백
+**저장소**: Vercel KV (Upstash Redis)
 **테스트**: Vitest
 
 ## 폴더 구조
@@ -75,16 +84,16 @@ AI 도구가 매번 코드베이스를 처음부터 탐색하지 않도록 진�
 │       ├── fallback.ts           # 멀티 폴백 오케스트레이션
 │       ├── prompt.ts             # 시스템 프롬프트 + few-shot
 │       ├── schema.ts             # zod 스키마 (FromAI / 후처리 후 2단)
-│       ├── postProcess.ts        # AI 응답 + 정적 사전 정합
-│       ├── rateLimit.ts          # Vercel KV 기반 일일 10회
+│       ├── postProcess.ts        # AI 응답 + 정적 사전 정합 (안전망)
+│       ├── regulations.ts        # 정적 사전 50개 + 매칭
+│       ├── rateLimit.ts          # Vercel KV 기반 일일 5회
 │       └── errors.ts             # ProviderError 분류
 ├── src/                          # React 클라이언트
 │   ├── views/analyzer/           # 단일 도메인 (View/Hook/Style 분리)
 │   ├── store/                    # Zustand
 │   ├── lib/api.ts                # /api/analyze 클라이언트 (단일 진입점)
 │   ├── components/               # base / common
-│   ├── styles/                   # theme / globals / emotion 타입
-│   └── data/regulations.ts       # 정적 사전 50개
+│   └── styles/                   # theme / globals / emotion 타입
 └── tests/                        # Vitest (한글 describe/it)
 ```
 
