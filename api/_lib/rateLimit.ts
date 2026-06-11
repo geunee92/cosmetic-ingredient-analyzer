@@ -4,7 +4,7 @@
  * 본인 OpenAI/Anthropic 키의 비용 폭발 방지를 1차 목표로 한다.
  *
  * 정책:
- *   - IP당 일일 10회 (KST 자정 리셋)
+ *   - IP당 일일 5회 (KST 자정 리셋)
  *   - 키 형식: rate:<ip>:<YYYY-MM-DD-KST>
  *   - INCR + EXPIRE 원자 연산
  *   - 메모리 기반은 stateless 환경에서 무력하므로 KV 필수
@@ -16,7 +16,7 @@
 
 import { kv } from '@vercel/kv';
 
-export const DAILY_LIMIT = 10;
+export const DAILY_LIMIT = 5;
 
 export type QuotaResult = {
   allowed: boolean;

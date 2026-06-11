@@ -64,13 +64,13 @@ describe('rateLimit', () => {
   });
 
   describe('consumeQuota', () => {
-    it('첫 호출은 통과하고 remaining이 9가 된다', async () => {
+    it('첫 호출은 통과하고 remaining이 DAILY_LIMIT-1이 된다', async () => {
       const result = await consumeQuota('1.2.3.4');
       expect(result.allowed).toBe(true);
-      expect(result.remaining).toBe(9);
+      expect(result.remaining).toBe(DAILY_LIMIT - 1);
     });
 
-    it('10회까지 통과하고 11회째에 차단된다', async () => {
+    it('5회까지 통과하고 6회째에 차단된다', async () => {
       for (let i = 0; i < DAILY_LIMIT; i++) {
         const r = await consumeQuota('1.2.3.4');
         expect(r.allowed).toBe(true);

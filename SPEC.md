@@ -202,7 +202,7 @@ type AttemptSummary = {
 ```
 
 응답 헤더:
-- `X-RateLimit-Limit: 10`
+- `X-RateLimit-Limit: 5`
 - `X-RateLimit-Remaining: <남은 횟수>`
 - `X-RateLimit-Reset: <epoch sec, KST 자정>`
 
@@ -219,7 +219,7 @@ type AttemptSummary = {
 ### 4.3 `GET /api/quota` (선택)
 ```typescript
 type QuotaResponse = {
-  limit: 10;
+  limit: 5;
   remaining: number;
   resetAt: number;                  // epoch sec
 };
@@ -439,7 +439,7 @@ export const STATIC_INGREDIENTS: StaticIngredient[] = [
 | 1차 provider 401/403 | 서버 (즉시 throw) | 500 | `auth` — 키 문제, 폴백 무의미 |
 | 모든 provider 실패 | 서버 | 502 | `all_providers_failed` + attempts 본문 |
 | 전체 처리가 Vercel Functions 한도 초과 | 인프라 | 504 | `timeout` 안내 |
-| Rate limit 초과 (일일 10회) | 서버 | 429 | `rate_limit` + resetAt + headers |
+| Rate limit 초과 (일일 5회) | 서버 | 429 | `rate_limit` + resetAt + headers |
 | Vercel KV 일시 장애 (rate limit 저장소) | 서버 (fail-open) | 200 | 카운터 누락 허용 후 정상 처리. LESSONS.md에 한계 기록 |
 
 ### 8.1 Fail-open vs Fail-close 결정
@@ -456,7 +456,7 @@ export const STATIC_INGREDIENTS: StaticIngredient[] = [
 ## §9. Rate Limiting 명세 (별도 강조)
 
 ### 9.1 정책
-- IP당 **일일 10회** (KST 자정 리셋)
+- IP당 **일일 5회** (KST 자정 리셋)
 - 본인 OpenAI/Claude 키 비용 폭발 방지가 1차 목표
 - 후속 조정 가능 (LESSONS.md 통해)
 
@@ -480,7 +480,7 @@ export const STATIC_INGREDIENTS: StaticIngredient[] = [
 ```
 
 ### 9.5 응답 헤더 (모든 `/api/analyze` 응답)
-- `X-RateLimit-Limit: 10`
+- `X-RateLimit-Limit: 5`
 - `X-RateLimit-Remaining: <0~10>`
 - `X-RateLimit-Reset: <epoch sec, 다음 KST 자정>`
 
@@ -611,7 +611,7 @@ v1은 전성분을 단일 AI 호출로 분석하되 **모든 성분을 풀 출�
 | 8 | 모바일 프레임 420px 가독성 | 카드 내부 정보 한 줄 안 넘치게: 성분명/뱃지/효능을 압축 표현, 한글명은 줄바꿈 허용 | ✅ |
 | 9 | `schemaVersion` 일관성 | `schema.ts`에 `z.literal('1')`, 모든 API 응답에 포함, v2는 `discriminatedUnion`로 전환 | ✅ |
 | 10 | Rate limit이 stateless에서 정확히 동작 | Vercel KV INCR + EXPIRE 원자 연산. 키 `rate:<ip>:<YYYY-MM-DD-KST>` | ✅ |
-| 11 | 정상 사용자 1명 차단되지 않는 균형 | 일일 10회. 데모/디버깅 시 `SKIP_RATE_LIMIT=1` 우회 | ✅ |
+| 11 | 정상 사용자 1명 차단되지 않는 균형 | 일일 5회. 데모/디버깅 시 `SKIP_RATE_LIMIT=1` 우회 | ✅ |
 | 12 | Rate limit 카운터가 폴백으로 부풀지 않음 | 요청 진입 시 1회만 INCR. `withFallback` 내부 호출은 카운트 제외 | ✅ |
 | 13 | Vercel KV 장애 시 동작 | **Fail-open** (요청 통과). 로그에 `kv_failure: true` | ✅ |
 | 14 | 의료 disclaimer 누락 방지 | `AnalysisResult.disclaimer` 강제 필드 + 결과 화면 하단 항상 표시 | ✅ |

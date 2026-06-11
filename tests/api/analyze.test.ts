@@ -132,7 +132,7 @@ describe('POST /api/analyze', () => {
     // 사전 매칭으로 source가 static으로 덮어씌워짐
     expect(body.result.ingredients[0].source).toBe('static');
     expect(body.result.ingredients[0].name).toBe('Niacinamide');
-    expect(res.headers['X-RateLimit-Remaining']).toBe('9');
+    expect(res.headers['X-RateLimit-Remaining']).toBe('4');
   });
 
   it('OpenAI 실패 → Claude 폴백 → 200 + attempts에 폴백 기록', async () => {
@@ -186,18 +186,18 @@ describe('POST /api/analyze', () => {
     expect(openaiAnalyze).not.toHaveBeenCalled();
   });
 
-  it('Rate limit 11회째 호출 → 429 + Remaining 0', async () => {
+  it('Rate limit 6회째 호출 → 429 + Remaining 0', async () => {
     openaiAnalyze.mockResolvedValue(validAiResponse);
 
-    // 10회 통과
-    for (let i = 0; i < 10; i++) {
+    // 5회 통과
+    for (let i = 0; i < 5; i++) {
       const req = mockReq({ kind: 'text', ingredients: 'Niacinamide' });
       const res = mockRes();
       await handler(req, res as unknown as VercelResponse);
       expect(res.statusCode).toBe(200);
     }
 
-    // 11회째 차단
+    // 6회째 차단
     const req = mockReq({ kind: 'text', ingredients: 'Niacinamide' });
     const res = mockRes();
     await handler(req, res as unknown as VercelResponse);
@@ -222,6 +222,6 @@ describe('POST /api/analyze', () => {
     await handler(req, res as unknown as VercelResponse);
 
     // 한 요청 = 1회 카운트 (provider 2번 호출됐어도)
-    expect(res.headers['X-RateLimit-Remaining']).toBe('9');
+    expect(res.headers['X-RateLimit-Remaining']).toBe('4');
   });
 });
