@@ -26,6 +26,7 @@ const validResult: AnalysisResult = {
       ],
       confidence: 0.95,
       source: 'static',
+      tier: 'notable',
     },
   ],
   disclaimer: '본 분석은 의료 조언이 아닙니다.',

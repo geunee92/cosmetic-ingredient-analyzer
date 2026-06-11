@@ -91,6 +91,7 @@ const validAiResponse = {
       name: 'Niacinamide',
       koreanName: '나이아신아마이드',
       purpose: '피지 조절 / 미백',
+      tier: 'notable' as const,
       cautions: [],
       allergens: [],
       regulations: [
